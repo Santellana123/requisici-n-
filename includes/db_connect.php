@@ -3,7 +3,7 @@
 $host = 'localhost';
 $user = 'root';
 $pass = ''; 
-$db   = 'sistema_requisiciones_itsm';
+$db   = 'prueba';
 
 $conn = new mysqli($host, $user, $pass, $db);
 $conn->set_charset("utf8mb4");

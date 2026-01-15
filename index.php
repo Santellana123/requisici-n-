@@ -2,7 +2,12 @@
 require 'includes/session_check.php';
 require 'includes/db_connect.php'; 
 
-// Seguridad
+// --- 0. VERIFICAR INSTALACIÓN (NUEVO) ---
+// Si no hay admin, nos manda a crear uno.
+require 'includes/check_install.php';
+// ----------------------------------------
+
+// Seguridad: Si es Director, va al panel de admin
 if ($_SESSION['rol'] == 'director_planeacion') {
     header("Location: admin.php");
     exit;
@@ -10,7 +15,13 @@ if ($_SESSION['rol'] == 'director_planeacion') {
 
 $area_id = $_SESSION['area_id'];
 
-// --- 1. OBTENER EL NOMBRE DEL PROGRAMA (ÁREA) ---
+// --- 1. OBTENER AÑO FISCAL ACTIVO ---
+// Esto es vital para que el usuario solo vea materiales del año correcto
+$sql_conf = "SELECT valor FROM configuracion WHERE clave = 'anio_fiscal_activo' LIMIT 1";
+$res_conf = $conn->query($sql_conf);
+$anio_activo = ($row_conf = $res_conf->fetch_assoc()) ? $row_conf['valor'] : date('Y');
+
+// --- 2. OBTENER EL NOMBRE DEL PROGRAMA (ÁREA) ---
 $nombre_programa_auto = "Sin Asignar";
 $sql_area = "SELECT nombre_programa FROM areas WHERE id = ? LIMIT 1";
 $stmt_area = $conn->prepare($sql_area);
@@ -22,13 +33,23 @@ if ($stmt_area->execute()) {
     }
 }
 
-// --- 2. OBTENER PROYECTOS (PROCESOS) DISPONIBLES ---
-// Consultamos los procesos únicos disponibles en la tabla poa_items
+// --- 3. OBTENER PROYECTOS (PROCESOS) DISPONIBLES ---
+// Consultamos los procesos únicos, PERO filtrando por el AÑO ACTIVO
+// Hacemos JOIN con poa_archivos para validar el año
 $proyectos_db = [];
 
-$sql_proy = "SELECT DISTINCT proceso FROM poa_items WHERE area_id = ? AND cantidad_disponible > 0 ORDER BY proceso ASC";
+$sql_proy = "SELECT DISTINCT pi.proceso 
+             FROM poa_items pi
+             JOIN poa_archivos pa ON pi.poa_archivo_id = pa.id
+             WHERE pi.area_id = ? 
+               AND pa.anio_fiscal = ? 
+               AND pi.cantidad_disponible > 0 
+             ORDER BY pi.proceso ASC";
+
 $stmt = $conn->prepare($sql_proy);
-$stmt->bind_param("i", $area_id);
+// "is" -> integer (area_id), string (anio_activo)
+$stmt->bind_param("is", $area_id, $anio_activo);
+
 if ($stmt->execute()) {
     $res = $stmt->get_result();
     while ($row = $res->fetch_assoc()) {
@@ -65,7 +86,7 @@ if ($stmt->execute()) {
     <main class="container">
         
         <div class="page-title">
-            <h2>Generar Nueva Requisición (POA 2025)</h2>
+            <h2>Generar Nueva Requisición (POA <?php echo $anio_activo; ?>)</h2>
             <p>Complete los campos basándose en el formato oficial FO-COM-06.</p>
         </div>
 
@@ -92,7 +113,7 @@ if ($stmt->execute()) {
                         <label for="proyecto">Proyecto / Proceso:</label>
                         <select id="proyecto" required>
                             <?php if(empty($proyectos_db)): ?>
-                                <option value="">-- No hay proyectos con presupuesto --</option>
+                                <option value="">-- No hay proyectos activos en <?php echo $anio_activo; ?> --</option>
                             <?php else: ?>
                                 <option value="">-- Seleccione un Proyecto --</option>
                                 <?php foreach($proyectos_db as $proy): ?>
@@ -111,7 +132,7 @@ if ($stmt->execute()) {
                 
                 <div class="search-hero">
                     <label style="display:block; margin-bottom: 8px; color: var(--primary); font-weight:600;">
-                        <i class="fa-solid fa-magnifying-glass"></i> Buscar en Presupuesto Autorizado:
+                        <i class="fa-solid fa-magnifying-glass"></i> Buscar en Presupuesto Autorizado (<?php echo $anio_activo; ?>):
                     </label>
                     <input type="text" id="buscar-material" autocomplete="off" placeholder="Escribe nombre, código o partida..." style="border: 2px solid #bfdbfe;">
                     <ul id="resultados-busqueda"></ul>
